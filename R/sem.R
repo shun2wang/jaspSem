@@ -24,6 +24,7 @@ SEM <- function(jaspResults, dataset, options, ...) {
   # TODO: don't read data if we aren't ready anyway...
   dataset <- .semReadData(dataset, options)
   ready   <- .semIsReady(dataset, options)
+  options <- .semEditOptions(dataset, options)
 
   modelContainer <- .semModelContainer(jaspResults)
 
@@ -85,6 +86,38 @@ SEM <- function(jaspResults, dataset, options, ...) {
   return(FALSE)
 }
 
+.semEditOptions <- function(dataset, options) {
+  indicators <- unlist(unique(lapply(options[["models"]], function(x) {
+    parsed <- lavaan::lavParseModelString(x[["syntax"]], TRUE)
+    return(unique(parsed[parsed$op == "=~",]$rhs))
+  })))
+  ordered_vars <- sapply(dataset[indicators], is.ordered)
+  if(length(ordered_vars) == 0) {
+    if (options[["naAction"]] == "default") {
+      if(options[["estimator"]] %in% c("gls", "wls", "uls", "dwls")) {
+        options[["naAction"]] <- "listwise"
+      } else {
+        options[["naAction"]] <- "fiml"
+      }
+    }
+  } else {
+    if (sum(ordered_vars > 0) && options[["estimator"]] == "default") {
+      options[["estimator"]] <- "wlsmv"
+      if (options[["naAction"]] == "default")
+        options[["naAction"]] <- "listwise"
+    } else {
+      if (options[["naAction"]] == "default") {
+        if(options[["estimator"]] %in% c("gls", "wls", "uls", "dwls")) {
+          options[["naAction"]] <- "listwise"
+        } else {
+          options[["naAction"]] <- "fiml"
+        }
+      }
+    }
+  }
+  return(options)
+}
+
 .semCheckErrors <- function(dataset, options, ready, modelContainer) {
   if (!ready) return()
 
@@ -98,7 +131,7 @@ SEM <- function(jaspResults, dataset, options, ...) {
   }
 
   # check FIML
-  if (!options[["estimator"]] %in% c("default", "ml", "mlm", "mlr", "mlf", "mlmvs") && options[["naAction"]] == "fiml") {
+  if (options[["estimator"]] %in% c("gls", "wls", "uls", "dwls") && options[["naAction"]] == "fiml") {
     modelContainer$setError(gettext("FIML missing data handling only available with ML-type estimators"))
   }
 
@@ -328,8 +361,6 @@ checkLavaanModel <- function(model, availableVars) {
   #' see ?lavOptions for documentation
   lavopts <- lavaan::lavOptions()
 
-  lavopts[["mimic"]] <- options[["emulation"]]
-
 
   # model features
   lavopts[["meanstructure"]]   <- options[["meanStructure"]]
@@ -357,21 +388,23 @@ checkLavaanModel <- function(model, availableVars) {
                                                       options[["naAction"]]))))
 
   # estimation options
-  ordered_vars <- sapply(dataset, is.ordered)
-  if (sum(ordered_vars > 0) && options[["estimator"]] == "default")
-    options[["estimator"]] <- "wlsmv"
-
+  lavopts[["information"]] <- options[["informationMatrix"]]
   lavopts[["estimator"]]   <- options[["estimator"]]
-  if (options[["estimator"]] %in% c("default", "ml", "gls", "wls", "uls", "dwls", "pml"))
+  if (options[["estimator"]] %in% c("default", "ml", "gls", "wls", "uls", "dwls", "pml")) {
     lavopts[["se"]]          <- ifelse(options[["errorCalculationMethod"]] == "bootstrap", "standard",
                                        ifelse(options[["errorCalculationMethod"]] == "robust", "robust.sem", options[["errorCalculationMethod"]]))
-  lavopts[["information"]] <- options[["informationMatrix"]]
-  lavopts[["test"]]        <- ifelse(options[["modelTest"]] == "satorraBentler", "Satorra.Bentler",
-                                     ifelse(options[["modelTest"]] == "yuanBentler", "Yuan.Bentler",
-                                            ifelse(options[["modelTest"]] == "meanAndVarianceAdjusted", "mean.var.adjusted",
-                                                   ifelse(options[["modelTest"]] == "scaledAndShifted", "scaled.shifted",
-                                                          ifelse(options[["modelTest"]] == "bollenStine", "Bollen.Stine",
-                                                                 options[["modelTest"]])))))
+    lavopts[["test"]]        <- switch(options[["modelTest"]],
+                                       "satorraBentler" = "Satorra.Bentler",
+                                       "yuanBentler" = "Yuan.Bentler",
+                                       "meanAndVarianceAdjusted" = "mean.var.adjusted",
+                                       "scaledAndShifted" = "scaled.shifted",
+                                       "bollenStine" = "Bollen.Stine",
+                                       "default" = "default",
+                                       "standard" = "standard")
+  }
+  lavopts[["mimic"]]       <- options[["emulation"]]
+
+
 
   # group.equal options
   equality_constraints <- c(
@@ -455,13 +488,13 @@ checkLavaanModel <- function(model, availableVars) {
   fittab$addColumnInfo(name = "N",        title = gettext("n"),                  type = "integer")
   fittab$addColumnInfo(name = "Chisq",    title = gettext("&#967;&sup2;"),       type = "number" ,
                        overtitle = gettext("Baseline test"))
-  fittab$addColumnInfo(name = "Df",       title = gettext("df"),                 type = "number",
+  fittab$addColumnInfo(name = "Df",       title = gettext("df"),                 type = "integer",
                        overtitle = gettext("Baseline test"))
   fittab$addColumnInfo(name = "PrChisq",  title = gettext("p"),                  type = "pvalue",
                        overtitle = gettext("Baseline test"))
   fittab$addColumnInfo(name = "dchisq",   title = gettext("&#916;&#967;&sup2;"), type = "number" ,
                        overtitle = gettext("Difference test"))
-  fittab$addColumnInfo(name = "ddf",      title = gettext("&#916;df"),           type = "number",
+  fittab$addColumnInfo(name = "ddf",      title = gettext("&#916;df"),           type = "integer",
                        overtitle = gettext("Difference test"))
   fittab$addColumnInfo(name = "dPrChisq", title = gettext("p"),                  type = "pvalue" ,
                        overtitle = gettext("Difference test"))
@@ -493,10 +526,10 @@ checkLavaanModel <- function(model, availableVars) {
   fittab[["BIC"]]      <- lrt$value[["BIC"]]
   fittab[["N"]]        <- Ns
   fittab[["Chisq"]]    <- lrt$value[["Chisq"]]
-  fittab[["Df"]]       <- lrt$value[["Df"]]
+  fittab[["Df"]]       <- round(lrt$value[["Df"]], 3)
   fittab[["PrChisq"]]  <- pchisq(q = lrt$value[["Chisq"]], df = lrt$value[["Df"]], lower.tail = FALSE)
   fittab[["dchisq"]]   <- lrt$value[["Chisq diff"]]
-  fittab[["ddf"]]      <- lrt$value[["Df diff"]]
+  fittab[["ddf"]]      <- round(lrt$value[["Df diff"]], 3)
   fittab[["dPrChisq"]] <- lrt$value[["Pr(>Chisq)"]]
 
   # add warning footnote
@@ -504,43 +537,46 @@ checkLavaanModel <- function(model, availableVars) {
     fittab$addFootnote(gsub("lavaan WARNING: ", "", lrt$warnings[[1]]$message))
   }
 
-  if(options$naAction == "listwise"){
-    nrm <- nrow(dataset) - lavaan::lavInspect(semResults[[1]], "ntotal")
-    if (nrm != 0) {
-      missingFootnote <- gettextf("A total of %g cases were removed due to missing values. You can avoid this by choosing 'FIML' under 'Missing Data Handling' in the Estimation options.",
-                                  nrm)
-      fittab$addFootnote(message = missingFootnote)
-    }
+  # add missing data handling footnote
+  nrm <- nrow(dataset) - lavaan::lavInspect(semResults[[1]], "ntotal")
+  if(nrm == 0) {
+    fittab$addFootnote(gettextf("Missing data handling: <i>%1$s</i>.", ifelse(options[["naAction"]] == "fiml", "Full information maximum likelihood", options[["naAction"]])))
+  } else {
+    fittab$addFootnote(gettextf("Missing data handling: <i>%1$s</i>. Removed cases: %2$s", ifelse(options[["naAction"]] == "fiml", "Full information maximum likelihood", options[["naAction"]]), nrm))
+  }
+
+  #add ordinal endogenous estimation footnote
+  if (options[["estimator"]] == "wlsmv") {
+    fittab$addFootnote(message = gettext("Ordinal endogenous variable(s) detected! Automatically switched to <i>DWLS</i> estimation with <i>robust</i> standard errors, <i>robust</i> confidence intervals and a <i>scaled and shifted</i> test-statistic. <br><i>If you wish to override these settings, please select another (LS-)estimator and \u2014optionally\u2014 select the preferred error calculation method and model test in the 'Estimation' tab.</i>"))
   }
 
   # add test statistic correction footnote
-  test <- lavaan::lavInspect(semResults[[1]], "options")[["test"]]
+  if (options[["estimator"]] != "wlsmv") {
+    test <- lavaan::lavInspect(semResults[[1]], "options")[["test"]]
 
-  if (test != "standard") {
-    LUT <- tibble::tribble(
-      ~option,              ~name,
-      "Satorra.Bentler",    gettext("Satorra-Bentler scaled test-statistic"),
-      "Yuan.Bentler",       gettext("Yuan-Bentler scaled test-statistic"),
-      "Yuan.Bentler.Mplus", gettext("Yuan-Bentler (Mplus) scaled test-statistic"),
-      "mean.var.adjusted",  gettext("mean and variance adjusted test-statistic"),
-      "Satterthwaite",      gettext("mean and variance adjusted test-statistic"),
-      "scaled.shifted",     gettext("scaled and shifted test-statistic"),
-      "Bollen.Stine",       gettext("bootstrap (Bollen-Stine) probability value"),
-      "bootstrap",          gettext("bootstrap (Bollen-Stine) probability value"),
-      "boot",               gettext("bootstrap (Bollen-Stine) probability value")
-    )
-    testname <- LUT[test == tolower(LUT$option), "name"][[1]]
-    ftext <- gettextf("Model tests based on %s.", testname)
-    fittab$addFootnote(message = ftext)
+    if (test != "standard") {
+      LUT <- tibble::tribble(
+        ~option,              ~name,
+        "Satorra.Bentler",    gettext("Satorra-Bentler scaled test-statistic"),
+        "Yuan.Bentler",       gettext("Yuan-Bentler scaled test-statistic"),
+        "Yuan.Bentler.Mplus", gettext("Yuan-Bentler (Mplus) scaled test-statistic"),
+        "mean.var.adjusted",  gettext("mean and variance adjusted test-statistic"),
+        "Satterthwaite",      gettext("mean and variance adjusted test-statistic"),
+        "scaled.shifted",     gettext("scaled and shifted test-statistic"),
+        "Bollen.Stine",       gettext("bootstrap (Bollen-Stine) probability value"),
+        "bootstrap",          gettext("bootstrap (Bollen-Stine) probability value"),
+        "boot",               gettext("bootstrap (Bollen-Stine) probability value")
+      )
+      testname <- LUT[test == tolower(LUT$option), "name"][[1]]
+      ftext <- gettextf("Model tests based on %s.", testname)
+      fittab$addFootnote(message = ftext)
+    }
   }
+
 
   if (options$estimator %in% c("dwls", "gls", "wls", "uls", "wlsm", "wlsmvs", "wlsmv", "ulsm", "ulsmv", "ulsmvs")) {
     fittab$addFootnote(message = gettext("The AIC, BIC and additional information criteria are only available with ML-type estimators"))
   }
-  ordered_vars <- sapply(dataset, is.ordered)
-  if (sum(ordered_vars > 0) && options[["estimator"]] == "default")
-    fittab$addFootnote(message = gettext("Ordered variable(s) detected! Automatically switched to WLSMV estimator (robust). If you wish to override this setting, please select another estimator in the 'Estimation options' tab."))
-}
 
 .semParameters <- function(modelContainer, dataset, options, ready) {
   if (!is.null(modelContainer[["params"]])) return()
@@ -1044,9 +1080,10 @@ checkLavaanModel <- function(model, availableVars) {
 
   .computeFitMeasures <- function(fit, alpha = 0.05) {
     fm <- lavaan::fitMeasures(fit, fit.measures = "all")
-    if (lavaan::lavInspect(fit, what = "options")[["test"]] != "standard")
-      fm[c("chisq", "df", "baseline.chisq", "baseline.df", "cfi", "tli", "nnfi", "rfi", "ifi", "rni", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "rmsea.pvalue")] <- fm[c("chisq.scaled", "df.scaled", "baseline.chisq.scaled", "baseline.df.scaled", "cfi.scaled", "tli.scaled", "nnfi.scaled", "rfi.scaled", "ifi.scaled", "rni.scaled", "rmsea.scaled", "rmsea.ci.lower.scaled", "rmsea.ci.upper.scaled", "rmsea.pvalue.scaled")]
-
+    if (lavaan::lavInspect(fit, what = "options")[["test"]] != "standard") {
+      fm[c("chisq", "df", "baseline.chisq", "baseline.df", "cfi", "tli", "nnfi", "nfi", "rfi", "ifi", "rni", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "rmsea.pvalue")] <- fm[c("chisq.scaled", "df.scaled", "baseline.chisq.scaled", "baseline.df.scaled", "cfi.scaled", "tli.scaled", "nnfi.scaled", "nfi.scaled",  "rfi.scaled", "ifi.scaled", "rni.scaled", "rmsea.scaled", "rmsea.ci.lower.scaled", "rmsea.ci.upper.scaled", "rmsea.pvalue.scaled")]
+      fm["pnfi"] <- NA
+      }
 
 
     ncp_chi2 <- function(alpha, chisqModel, df){
@@ -1130,7 +1167,7 @@ checkLavaanModel <- function(model, availableVars) {
   fitin$addFootnote(gettextf("T-size CFI is computed for <i>%s = 0.05</i>", "\u03B1"))
 
   # information criteria
-  if (!options$estimator %in% c("dwls", "gls", "wls", "uls")) {
+  if (!options$estimator %in% c("dwls", "gls", "wls", "uls", "wlsmv")) {
     fitic[["index"]] <- c(
       gettext("Log-likelihood"),
       gettext("Number of free parameters"),

@@ -92,22 +92,28 @@ SEM <- function(jaspResults, dataset, options, ...) {
     return(unique(parsed[parsed$op == "=~",]$rhs))
   })))
   ordered_vars <- sapply(dataset[indicators], is.ordered)
-  if(length(ordered_vars) == 0) {
+  if(length(ordered_vars) == 0 || sum(ordered_vars) == 0) {
+    options[["order"]] <- FALSE
     if (options[["naAction"]] == "default") {
-      if(options[["estimator"]] %in% c("gls", "wls", "uls", "dwls")) {
+      if(options[["estimator"]] %in% c("gls", "wls", "uls", "dwls", "pml")) {
         options[["naAction"]] <- "listwise"
       } else {
         options[["naAction"]] <- "fiml"
       }
     }
   } else {
-    if (sum(ordered_vars > 0) && options[["estimator"]] == "default") {
-      options[["estimator"]] <- "wlsmv"
+    options[["order"]] <- TRUE
+    if (options[["estimator"]] == "default") {
+      if(options[["modelTest"]] == "default" && options[["errorCalculationMethod"]] %in% c("standard", "robust")) {
+        options[["estimator"]] <- "wlsmv"
+      } else {
+        options[["estimator"]] <- "dwls"
+      }
       if (options[["naAction"]] == "default")
         options[["naAction"]] <- "listwise"
     } else {
       if (options[["naAction"]] == "default") {
-        if(options[["estimator"]] %in% c("gls", "wls", "uls", "dwls")) {
+        if(options[["estimator"]] %in% c("gls", "wls", "uls", "dwls", "pml")) {
           options[["naAction"]] <- "listwise"
         } else {
           options[["naAction"]] <- "fiml"
@@ -131,9 +137,13 @@ SEM <- function(jaspResults, dataset, options, ...) {
   }
 
   # check FIML
-  if (options[["estimator"]] %in% c("gls", "wls", "uls", "dwls") && options[["naAction"]] == "fiml") {
-    modelContainer$setError(gettext("FIML missing data handling only available with ML-type estimators"))
+  if(options[["order"]] && options[["estimator"]] %in% c("default", "ml", "mlr", "mlf")) {
+    .quitAnalysis(gettext("ML estimation only available when all endogenous variables are of scale type."))
   }
+  if (options[["estimator"]] %in% c("gls", "wls", "uls", "dwls", "wlsmv") && options[["naAction"]] == "fiml") {
+    .quitAnalysis(gettext("FIML missing data handling only available with ML-type estimators"))
+  }
+
 
   # Check whether grouping variable is a grouping variable
   if (options[["group"]] != "") {
@@ -249,7 +259,7 @@ checkLavaanModel <- function(model, availableVars) {
 .semComputeResults <- function(modelContainer, dataset, options) {
   #' create result list from options
   # find reusable results
-  if (!options[["estimator"]] %in% c("default", "ml", "mlm", "mlr", "mlf", "mlmvs") && options[["naAction"]] == "fiml") return()
+  if (!options[["estimator"]] %in% c("default", "ml", "mlr", "mlf") && options[["naAction"]] == "fiml") return()
 
   oldmodels  <- modelContainer[["models"]][["object"]]
   oldresults <- modelContainer[["results"]][["object"]]
@@ -483,8 +493,10 @@ checkLavaanModel <- function(model, availableVars) {
   fittab$position <- 0
 
   fittab$addColumnInfo(name = "Model",    title = "",                            type = "string" )
-  fittab$addColumnInfo(name = "AIC",      title = gettext("AIC"),                type = "number" )
-  fittab$addColumnInfo(name = "BIC",      title = gettext("BIC"),                type = "number" )
+  if (options[["estimator"]] %in% c("default", "ml", "pml", "mlr", "mlf")) {
+    fittab$addColumnInfo(name = "AIC",      title = gettext("AIC"),                type = "number" )
+    fittab$addColumnInfo(name = "BIC",      title = gettext("BIC"),                type = "number" )
+  }
   fittab$addColumnInfo(name = "N",        title = gettext("n"),                  type = "integer")
   fittab$addColumnInfo(name = "Chisq",    title = gettext("&#967;&sup2;"),       type = "number" ,
                        overtitle = gettext("Baseline test"))
@@ -522,8 +534,10 @@ checkLavaanModel <- function(model, availableVars) {
   }
 
   fittab[["Model"]]    <- rownames(lrt$value)
-  fittab[["AIC"]]      <- lrt$value[["AIC"]]
-  fittab[["BIC"]]      <- lrt$value[["BIC"]]
+  if (options[["estimator"]] %in% c("default", "ml", "pml", "mlr", "mlf")) {
+    fittab[["AIC"]]      <- lrt$value[["AIC"]]
+    fittab[["BIC"]]      <- lrt$value[["BIC"]]
+  }
   fittab[["N"]]        <- Ns
   fittab[["Chisq"]]    <- lrt$value[["Chisq"]]
   fittab[["Df"]]       <- round(lrt$value[["Df"]], 3)
@@ -577,6 +591,7 @@ checkLavaanModel <- function(model, availableVars) {
   if (options$estimator %in% c("dwls", "gls", "wls", "uls", "wlsm", "wlsmvs", "wlsmv", "ulsm", "ulsmv", "ulsmvs")) {
     fittab$addFootnote(message = gettext("The AIC, BIC and additional information criteria are only available with ML-type estimators"))
   }
+}
 
 .semParameters <- function(modelContainer, dataset, options, ready) {
   if (!is.null(modelContainer[["params"]])) return()
@@ -621,8 +636,8 @@ checkLavaanModel <- function(model, availableVars) {
     if(se_type == "standard") {
       se_type <- gettext("delta method")
       ci_type <- gettext("normal theory")
-    } else if (se_type == "Bootstrap") {
-      se_type <- gettext("Delta method")
+    } else if (se_type == "bootstrap") {
+      se_type <- gettext("delta method")
       ci_type <- switch(options$bootstrapCiType,
                         "percentile"              = gettext("percentile bootstrap"),
                         "normalTheory"            = gettext("normal theory bootstrap"),

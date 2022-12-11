@@ -91,7 +91,7 @@ SEM <- function(jaspResults, dataset, options, ...) {
     parsed <- lavaan::lavParseModelString(x[["syntax"]], TRUE)
     return(unique(parsed[parsed$op == "=~",]$rhs))
   })))
-  ordered_vars <- sapply(dataset[indicators], is.ordered)
+  ordered_vars <- sapply(dataset[,indicators], is.ordered)
   if(length(ordered_vars) == 0 || sum(ordered_vars) == 0) {
     options[["order"]] <- FALSE
     if (options[["naAction"]] == "default") {
@@ -137,7 +137,7 @@ SEM <- function(jaspResults, dataset, options, ...) {
   }
 
   # check FIML
-  if(options[["order"]] && options[["estimator"]] %in% c("default", "ml", "mlr", "mlf")) {
+  if(options[["order"]] && options[["estimator"]] %in% c("default", "ml", "mlr", "mlf", "pml")) {
     .quitAnalysis(gettext("ML estimation only available when all endogenous variables are of scale type."))
   }
   if (options[["estimator"]] %in% c("gls", "wls", "uls", "dwls", "wlsmv") && options[["naAction"]] == "fiml") {
@@ -391,27 +391,32 @@ checkLavaanModel <- function(model, availableVars) {
 
   # data options
   lavopts[["std.ov"]]  <- options[["standardizedVariable"]]
-  lavopts[["missing"]] <- ifelse(options[["naAction"]] == "fiml", "ml",
-                                 ifelse(options[["naAction"]] == "twoStage", "two.stage",
-                                        ifelse(options[["naAction"]] == "twoStageRobust", "robust.two.stage",
-                                               ifelse(options[["naAction"]] == "doublyRobust", "doubly.robust",
-                                                      options[["naAction"]]))))
+  lavopts[["missing"]] <- switch(options[["naAction"]],
+                                 "fiml" = "ml",
+                                 "twoStage" = "two.stage",
+                                 "twoStageRobust" = "robust.two.stage",
+                                 "doublyRobust" = "doubly.robust",
+                                 options[["naAction"]])
+
 
   # estimation options
   lavopts[["information"]] <- options[["informationMatrix"]]
   lavopts[["estimator"]]   <- options[["estimator"]]
-  if (options[["estimator"]] %in% c("default", "ml", "gls", "wls", "uls", "dwls", "pml")) {
-    lavopts[["se"]]          <- ifelse(options[["errorCalculationMethod"]] == "bootstrap", "standard",
-                                       ifelse(options[["errorCalculationMethod"]] == "robust", "robust.sem", options[["errorCalculationMethod"]]))
-    lavopts[["test"]]        <- switch(options[["modelTest"]],
-                                       "satorraBentler" = "Satorra.Bentler",
-                                       "yuanBentler" = "Yuan.Bentler",
-                                       "meanAndVarianceAdjusted" = "mean.var.adjusted",
-                                       "scaledAndShifted" = "scaled.shifted",
-                                       "bollenStine" = "Bollen.Stine",
-                                       "default" = "default",
-                                       "standard" = "standard")
+  if (options[["estimator"]] %in% c("default", "ml", "gls", "wls", "uls", "dwls")) {
+    lavopts[["se"]]        <- switch(options[["errorCalculationMethod"]],
+                                     "bootstrap" = "standard",
+                                     "robust" = "robust.sem",
+                                     options[["errorCalculationMethod"]])
+
+    lavopts[["test"]]      <- switch(options[["modelTest"]],
+                                     "satorraBentler" = "Satorra.Bentler",
+                                     "yuanBentler" = "Yuan.Bentler",
+                                     "meanAndVarianceAdjusted" = "mean.var.adjusted",
+                                     "scaledAndShifted" = "scaled.shifted",
+                                     "bollenStine" = "Bollen.Stine",
+                                     options[["modelTest"]])
   }
+
   lavopts[["mimic"]]       <- options[["emulation"]]
 
 
@@ -553,15 +558,18 @@ checkLavaanModel <- function(model, availableVars) {
 
   # add missing data handling footnote
   nrm <- nrow(dataset) - lavaan::lavInspect(semResults[[1]], "ntotal")
-  if(nrm == 0) {
-    fittab$addFootnote(gettextf("Missing data handling: <i>%1$s</i>.", ifelse(options[["naAction"]] == "fiml", "Full information maximum likelihood", options[["naAction"]])))
-  } else {
-    fittab$addFootnote(gettextf("Missing data handling: <i>%1$s</i>. Removed cases: %2$s", ifelse(options[["naAction"]] == "fiml", "Full information maximum likelihood", options[["naAction"]]), nrm))
-  }
+  method <- switch(options[["naAction"]],
+                   "twoStage" = "two-stage",
+                   "twoStageRobust" = "robust two-stage",
+                   "doublyRobust" = "doubly robust",
+                   "fiml" = "full information maximum likelihood",
+                   options[["naAction"]])
+  if(nrm > 0)
+    fittab$addFootnote(gettextf("Missing data handling: <i>%1$s</i>. Removed cases: %2$s", method, nrm))
 
   #add ordinal endogenous estimation footnote
   if (options[["estimator"]] == "wlsmv") {
-    fittab$addFootnote(message = gettext("Ordinal endogenous variable(s) detected! Automatically switched to <i>DWLS</i> estimation with <i>robust</i> standard errors, <i>robust</i> confidence intervals and a <i>scaled and shifted</i> test-statistic. <br><i>If you wish to override these settings, please select another (LS-)estimator and \u2014optionally\u2014 select the preferred error calculation method and model test in the 'Estimation' tab.</i>"))
+    fittab$addFootnote(message = gettext("Ordinal endogenous variable(s) detected! Automatically switched to <i>DWLS</i> estimation with <i>robust</i> standard errors, <i>robust</i> confidence intervals and a <i>scaled and shifted</i> test-statistic. <br><i>If you wish to override these settings, please select another (LS-)estimator and/or model test and \u2014optionally\u2014 change the error calculation method in the 'Estimation' tab.</i>"))
   }
 
   # add test statistic correction footnote
@@ -637,7 +645,7 @@ checkLavaanModel <- function(model, availableVars) {
       se_type <- gettext("delta method")
       ci_type <- gettext("normal theory")
     } else if (se_type == "bootstrap") {
-      se_type <- gettext("delta method")
+      se_type <- gettext("bootstrap")
       ci_type <- switch(options$bootstrapCiType,
                         "percentile"              = gettext("percentile bootstrap"),
                         "normalTheory"            = gettext("normal theory bootstrap"),

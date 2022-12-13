@@ -10,6 +10,8 @@ test_that("Basic SEM works", {
   options$informationMatrix <- "expected"
   options$naAction          <- "fiml"
   options$modelTest         <- "standard"
+  options$errorCalculationMethod <- "standard"
+  options$ciLevel           <- 0.95
   results <- jaspTools::runAnalysis("SEM", "poldem_grouped.csv", options)
 
   fittab   <- results[["results"]][["modelContainer"]][["collection"]][["modelContainer_fittab"]][["data"]]
@@ -63,6 +65,8 @@ test_that("Multigroup, multimodel SEM works", {
   options$standardizedEstimate        = TRUE
   options$modelTest                   = "satorraBentler"
   options$samplingWeights             = ""
+  options$errorCalculationMethod      = "standard"
+  options$ciLevel                     = 0.95
 
   modelDefault <- list(model = "
   # latent variable definitions
@@ -459,6 +463,7 @@ test_that("Bootstrapping works", {
   options$errorCalculationMethod    <- "bootstrap"
   options$bootstrapCiType   <- "percentile"
   options$bootstrapSamples  <- 100
+  options$ciLevel           <- 0.95
 
   set.seed(1)
   results <- jaspTools::runAnalysis("SEM", "poldem_grouped.csv", options)
@@ -507,16 +512,18 @@ test_that("Bootstrapping works", {
 
 test_that("t-size RMSEA and CFI match values of original article (Katerina M. Marcoulides & Ke-Hai Yuan (2017))", {
   options <- jaspTools::analysisOptions("SEM")
-  options$sampleSize <- 600
-  options$samplingWeights <- ""
+  options$sampleSize            <- 600
+  options$samplingWeights       <- ""
   options$additionalFitMeasures <- TRUE
-  options$informationMatrix <- "expected"
-  options$estimator <- "default"
-  options$modelTest <- "standard"
-  options$naAction <- "ml"
-  options$emulation <- "mplus"
-  options$group <- ""
-  options$dataType <- "varianceCovariance"
+  options$informationMatrix     <- "expected"
+  options$estimator             <- "default"
+  options$modelTest             <- "standard"
+  options$naAction              <- "ml"
+  options$emulation             <- "mplus"
+  options$group                 <- ""
+  options$dataType              <- "varianceCovariance"
+  options$errorCalculationMethod <- "standard"
+  options$ciLevel               <- 0.95
   options$models <- list(list(name = "Model1", syntax = list(model = "factor1 =~ V1 + V2 + V3 + V4 + V5 + V6 + V7\n factor2 =~ V8 + V9 + V10 + V11 + V12",
                                                                   columns = c("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11", "V12"))))
   set.seed(1)

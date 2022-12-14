@@ -583,6 +583,8 @@ test_that("Variance-covariance input works", {
   options$informationMatrix <- "expected"
   options$naAction          <- "fiml"
   options$modelTest         <- "standard"
+  options$errorCalculationMethod <- "standard"
+  options$ciLevel           <- 0.95
   options$models <- list(
     list(name = "Model1", syntax = list(model = "F =~ x1 + x3 + y1", columns = c("x1", "x2", "x3"))),
     list(name = "Model2", syntax = list(model = "F =~ y1 + y2 + y3", columns = c("y1", "y2", "y3")))
@@ -597,6 +599,6 @@ test_that("Variance-covariance input works", {
   table <- results[["results"]][["modelContainer"]][["collection"]][["modelContainer_fittab"]][["data"]]
   jaspTools::expect_equal_tables(table,
                                  list(713.570148255052, 734.427541276879, 0, 0, "Model1", 75, 1, "",
-                                      "", "", 1101.63355300897, 1122.4909460308, 0, 0, "Model2", 75,
+                                      "", "", 1101.63355300898, 1122.4909460308, 0, 0, "Model2", 75,
                                       1, "", 0, 0))
 })
